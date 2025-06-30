@@ -1,0 +1,1019 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DHL-Selfridges Tagging Tracker</title>
+  <script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.development.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.development.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.22.5/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.10/dayjs.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <style>
+    .sticky-header th {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background-color: #FFC107;
+      border-bottom: 1px solid #000;
+    }
+    .fixed-section {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      background-color: #f3f4f6;
+    }
+    .table-container {
+      max-height: calc(100vh - 220px);
+      overflow-y: auto;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    class ErrorBoundary extends React.Component {
+      state = { hasError: false, error: null };
+
+      static getDerivedStateFromError(error) {
+        return { hasError: true, error };
+      }
+
+      render() {
+        if (this.state.hasError) {
+          return (
+            <div className="p-6 text-center text-red-600">
+              <h1>Something went wrong!</h1>
+              <p>{this.state.error?.message || 'Unknown error'}</p>
+              <button
+                onClick={() => {
+                  localStorage.clear();
+                  window.location.reload();
+                }}
+                className="mt-4 p-2 rounded text-white bg-red-600"
+              >
+                Clear Data and Reload
+              </button>
+            </div>
+          );
+        }
+        return this.props.children;
+      }
+    }
+
+    const App = () => {
+      const [csvData, setCsvData] = useState([]);
+      const [trackerData, setTrackerData] = useState([]);
+      const [pendingCompletion, setPendingCompletion] = useState([]);
+      const [archivedData, setArchivedData] = useState([]);
+      const [showArchivedModal, setShowArchivedModal] = useState(false);
+      const [showResetModal, setShowResetModal] = useState(false);
+      const [resetCode, setResetCode] = useState('');
+      const [lpnInput, setLpnInput] = useState('');
+      const [userInput, setUserInput] = useState('');
+      const [lpnFilter, setLpnFilter] = useState('');
+      const [userFilter, setUserFilter] = useState('');
+      const [selectedDate, setSelectedDate] = useState('');
+      const [selectedAssignDate, setSelectedAssignDate] = useState('');
+      const [showUserModal, setShowUserModal] = useState(false);
+      const [showEndModal, setShowEndModal] = useState(false);
+      const [showPendingPopup, setShowPendingPopup] = useState(false);
+      const [showEditModal, setShowEditModal] = useState(false);
+      const [selectedLpn, setSelectedLpn] = useState(null);
+      const [selectedEndIndex, setSelectedEndIndex] = useState(null);
+      const [selectedEditIndex, setSelectedEditIndex] = useState(null);
+      const [completedItems, setCompletedItems] = useState('');
+      const [editGroups, setEditGroups] = useState([]);
+      const [isAccordionOpen, setIsAccordionOpen] = useState(true);
+      const [pendingArchiveData, setPendingArchiveData] = useState(null);
+
+      const lpnInputRef = useRef(null);
+      const userInputRef = useRef(null);
+
+      const formatDateToYMD = (dateStr) => {
+        if (!dateStr) return '';
+        const date = new Date(dateStr);
+        if (isNaN(date)) return dateStr;
+        return date.toISOString().split('T')[0];
+      };
+
+      useEffect(() => {
+        try {
+          const savedTrackerData = localStorage.getItem('trackerData');
+          const savedPendingCompletion = localStorage.getItem('pendingCompletion');
+          const savedCsvData = localStorage.getItem('csvData');
+          if (savedTrackerData) {
+            setTrackerData(JSON.parse(savedTrackerData));
+          }
+          if (savedPendingCompletion) {
+            setPendingCompletion(JSON.parse(savedPendingCompletion));
+          }
+          if (savedCsvData) {
+            setCsvData(JSON.parse(savedCsvData));
+          }
+        } catch (error) {
+          console.error('Error loading data from localStorage:', error);
+          localStorage.clear();
+        }
+      }, []);
+
+      useEffect(() => {
+        try {
+          localStorage.setItem('trackerData', JSON.stringify(trackerData));
+          localStorage.setItem('pendingCompletion', JSON.stringify(pendingCompletion));
+          localStorage.setItem('csvData', JSON.stringify(csvData));
+        } catch (error) {
+          console.error('Error saving data to localStorage:', error);
+        }
+      }, [trackerData, pendingCompletion, csvData]);
+
+      // Monitorar o tamanho do trackerData e preparar para arquivamento
+      useEffect(() => {
+        if (trackerData.length >= 30000) {
+          // Ordenar por assignDate para arquivar as entradas mais antigas
+          const sortedData = [...trackerData].sort((a, b) => new Date(a.assignDate) - new Date(b.assignDate));
+          const toArchive = sortedData.slice(0, 20000); // Pegar as 20.000 mais antigas
+          const toKeep = sortedData.slice(20000); // Manter as 10.000 mais recentes
+
+          // Armazenar os dados a serem arquivados e exibir o alerta
+          setPendingArchiveData(toArchive);
+          alert('O arquivo XLSX com 20.000 linhas está pronto para download. Clique em OK para baixar.');
+          
+          // Gerar e baixar o arquivo XLSX
+          const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+          const filename = `archived_${timestamp}.xlsx`;
+
+          // Preparar os dados para o XLSX
+          const wsData = toArchive.map(row => ({
+            Date: row.date,
+            LPN: row.lpn,
+            User: row.user,
+            'Total Items': row.totalItems,
+            'Assign Date': row.assignDate,
+            'Start Time': row.startTime,
+            'End Time': row.endTime,
+            'Total Time': row.totalTime,
+            Efficiency: row.efficiency,
+          }));
+
+          // Criar a planilha
+          const ws = XLSX.utils.json_to_sheet(wsData);
+
+          // Calcular a largura das colunas
+          const colWidths = Object.keys(wsData[0]).map((key, colIndex) => {
+            const maxLength = Math.max(
+              ...wsData.map(row => (row[key] || '').toString().length),
+              key.length
+            );
+            return { wch: maxLength + 2 }; // Adicionar um pequeno padding
+          });
+          ws['!cols'] = colWidths;
+
+          // Criar o workbook e adicionar a planilha
+          const wb = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(wb, ws, 'Tracker Data');
+
+          // Gerar o arquivo XLSX e disparar o download
+          XLSX.writeFile(wb, filename);
+
+          // Atualizar o trackerData para manter apenas as 10.000 linhas
+          setTrackerData(toKeep);
+          setPendingArchiveData(null);
+        }
+      }, [trackerData]);
+
+      useEffect(() => {
+        const interval = setInterval(() => {
+          if (pendingCompletion.length > 0) {
+            setShowPendingPopup(true);
+          }
+        }, 60000);
+        return () => clearInterval(interval);
+      }, [pendingCompletion]);
+
+      useEffect(() => {
+        if (lpnInputRef.current) {
+          lpnInputRef.current.focus();
+        }
+      }, []);
+
+      useEffect(() => {
+        if (showUserModal && userInputRef.current) {
+          userInputRef.current.focus();
+        }
+      }, [showUserModal]);
+
+      const handleFileUpload = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        Papa.parse(file, {
+          header: true,
+          complete: (result) => {
+            const validData = result.data
+              .filter(row => row.LPN && row.LPN.trim() !== '')
+              .map(row => ({
+                ...row,
+                Date: formatDateToYMD(row.Date || ''),
+              }));
+            setCsvData(validData);
+          },
+          error: (error) => {
+            console.error('Error parsing CSV:', error);
+            alert('Failed to parse CSV file. Please check the file format.');
+          },
+        });
+      };
+
+      const handleResetAllData = () => {
+        setShowResetModal(true);
+      };
+
+      const confirmResetAllData = () => {
+        if (resetCode === 'abcd@1234') {
+          setCsvData([]);
+          setTrackerData([]);
+          setPendingCompletion([]);
+          setArchivedData([]);
+          setLpnInput('');
+          setUserInput('');
+          setLpnFilter('');
+          setUserFilter('');
+          setSelectedDate('');
+          setSelectedAssignDate('');
+          localStorage.clear();
+          setShowResetModal(false);
+          setResetCode('');
+        } else {
+          alert('Código de segurança incorreto. Tente novamente.');
+          setResetCode('');
+        }
+      };
+
+      const handleLpnScan = (e) => {
+        e.preventDefault();
+        const lpn = lpnInput.trim();
+        if (!lpn) return;
+
+        const pendingRecord = pendingCompletion.find((row) => row.lpn === lpn);
+        const trackerRecords = trackerData.filter((row) => row.lpn === lpn);
+        const openRecord = trackerRecords.some((row) => !row.endTime);
+
+        if (openRecord) {
+          alert('This LPN is already assigned and in progress!');
+          return;
+        }
+
+        if (pendingRecord) {
+          setSelectedLpn({
+            Date: pendingRecord.date,
+            LPN: pendingRecord.lpn,
+            ...pendingRecord.groups.reduce((acc, group) => {
+              acc[group.group] = group.qty;
+              return acc;
+            }, {}),
+          });
+          setShowUserModal(true);
+          return;
+        }
+
+        const csvRecord = csvData.find((row) => row.LPN === lpn);
+        if (!csvRecord) {
+          alert('LPN not found in the CSV');
+          return;
+        }
+
+        const totalItemsCsv = Object.keys(csvRecord)
+          .filter((key) => !isNaN(key) && csvRecord[key])
+          .reduce((sum, key) => sum + parseInt(csvRecord[key] || 0), 0);
+
+        const totalCompleted = trackerRecords
+          .filter((entry) => entry.endTime)
+          .reduce((sum, entry) => sum + (entry.totalItems || 0), 0);
+
+        if (totalCompleted >= totalItemsCsv && !pendingRecord) {
+          alert('LPN already fully completed!');
+          return;
+        }
+
+        setSelectedLpn(csvRecord);
+        setShowUserModal(true);
+      };
+
+      const handleAssignUser = () => {
+        if (!userInput.trim()) {
+          alert('Please enter a user name to assign the LPN!');
+          return;
+        }
+
+        const pendingRecord = pendingCompletion.find((row) => row.lpn === selectedLpn?.LPN);
+        let totalItems, groups;
+        
+        if (pendingRecord) {
+          totalItems = pendingRecord.totalItems || 0;
+          groups = pendingRecord.groups || [];
+          setPendingCompletion(pendingCompletion.filter((row) => row.lpn !== selectedLpn.LPN));
+        } else {
+          totalItems = Object.keys(selectedLpn)
+            .filter((key) => !isNaN(key) && selectedLpn[key])
+            .reduce((sum, key) => sum + parseInt(selectedLpn[key] || 0), 0);
+          groups = Object.keys(selectedLpn)
+            .filter((key) => !isNaN(key) && selectedLpn[key])
+            .map((key) => ({ group: key, qty: parseInt(selectedLpn[key]) }));
+        }
+
+        const newEntry = {
+          date: selectedLpn.Date || '',
+          lpn: selectedLpn.LPN || '',
+          user: userInput,
+          groups,
+          totalItems,
+          assignDate: new Date().toISOString().split('T')[0],
+          startTime: new Date().toLocaleTimeString(),
+          endTime: '',
+          totalTime: '',
+          efficiency: '',
+        };
+        setTrackerData([...trackerData, newEntry]);
+        setShowUserModal(false);
+        setLpnInput('');
+        setUserInput('');
+      };
+
+      const handleCancelAssign = () => {
+        setShowUserModal(false);
+        setLpnInput('');
+        setUserInput('');
+      };
+
+      const initiateEndTagging = (index) => {
+        setSelectedEndIndex(index);
+        setCompletedItems(trackerData[index]?.totalItems?.toString() || '');
+        setShowEndModal(true);
+      };
+
+      const handleEndTagging = () => {
+        const updatedData = [...trackerData];
+        const entry = updatedData[selectedEndIndex];
+        const completed = parseInt(completedItems);
+        const total = entry.totalItems || 0;
+
+        if (isNaN(completed) || completed < 0 || completed > total) {
+          alert('Please enter a valid number of completed items.');
+          return;
+        }
+
+        entry.totalItems = completed;
+        entry.endTime = new Date().toLocaleTimeString();
+        const start = new Date(`1970-01-01T${entry.startTime}Z`);
+        const end = new Date(`1970-01-01T${entry.endTime}Z`);
+        let diffMs = end - start;
+        if (diffMs < 0) diffMs += 24 * 60 * 60 * 1000;
+        const diffSec = Math.floor(diffMs / 1000);
+        const hours = Math.floor(diffSec / 3600);
+        const minutes = Math.floor((diffSec % 3600) / 60);
+        const seconds = diffSec % 60;
+        entry.totalTime = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        const diffHrs = diffMs / (1000 * 60 * 60);
+        const efficiency = (completed / diffHrs).toFixed(2);
+        entry.efficiency = `${((efficiency / 60) * 100).toFixed(2)}%`;
+
+        if (completed < total) {
+          const remainingItems = total - completed;
+          const ratio = remainingItems / total;
+          const newGroups = (entry.groups || []).map((group) => ({
+            group: group.group,
+            qty: Math.round(group.qty * ratio),
+          })).filter((group) => group.qty > 0);
+
+          const pendingEntry = {
+            date: entry.date,
+            lpn: entry.lpn,
+            groups: newGroups,
+            totalItems: remainingItems,
+          };
+          setPendingCompletion([...pendingCompletion, pendingEntry]);
+        }
+
+        setTrackerData(updatedData);
+        setShowEndModal(false);
+        setCompletedItems('');
+      };
+
+      const initiateEditPending = (index) => {
+        setSelectedEditIndex(index);
+        setEditGroups((pendingCompletion[index]?.groups || []).map((group) => ({ ...group })));
+        setShowEditModal(true);
+      };
+
+      const handleEditPending = () => {
+        const updatedPending = [...pendingCompletion];
+        const totalItems = editGroups.reduce((sum, group) => sum + (group.qty || 0), 0);
+        if (totalItems <= 0) {
+          alert('Total items must be greater than 0.');
+          return;
+        }
+        updatedPending[selectedEditIndex] = {
+          ...updatedPending[selectedEditIndex],
+          groups: editGroups,
+          totalItems: totalItems,
+        };
+        setPendingCompletion(updatedPending);
+        setShowEditModal(false);
+      };
+
+      const handleDownload = () => {
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const filename = `tracker_data_${timestamp}.xlsx`;
+
+        // Preparar os dados para o XLSX
+        const wsData = trackerData.map(row => ({
+          Date: row.date,
+          LPN: row.lpn,
+          User: row.user,
+          'Total Items': row.totalItems,
+          'Assign Date': row.assignDate,
+          'Start Time': row.startTime,
+          'End Time': row.endTime,
+          'Total Time': row.totalTime,
+          Efficiency: row.efficiency,
+        }));
+
+        // Criar a planilha
+        const ws = XLSX.utils.json_to_sheet(wsData);
+
+        // Calcular a largura das colunas
+        const colWidths = Object.keys(wsData[0]).map((key, colIndex) => {
+          const maxLength = Math.max(
+            ...wsData.map(row => (row[key] || '').toString().length),
+            key.length
+          );
+          return { wch: maxLength + 2 };
+        });
+        ws['!cols'] = colWidths;
+
+        // Criar o workbook e adicionar a planilha
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Tracker Data');
+
+        // Gerar o arquivo XLSX e disparar o download
+        XLSX.writeFile(wb, filename);
+      };
+
+      const handleViewArchivedData = () => {
+        setShowArchivedModal(true);
+      };
+
+      const handleLoadArchivedFile = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          try {
+            const data = event.target.result;
+            const workbook = XLSX.read(data, { type: 'binary' });
+            const sheetName = workbook.SheetNames[0];
+            const sheet = workbook.Sheets[sheetName];
+            const jsonData = XLSX.utils.sheet_to_json(sheet);
+            setArchivedData(jsonData.map(row => ({
+              date: row.Date || '',
+              lpn: row.LPN || '',
+              user: row.User || '',
+              totalItems: row['Total Items'] || 0,
+              assignDate: row['Assign Date'] || '',
+              startTime: row['Start Time'] || '',
+              endTime: row['End Time'] || '',
+              totalTime: row['Total Time'] || '',
+              efficiency: row.Efficiency || '',
+            })));
+          } catch (error) {
+            console.error('Error parsing archived XLSX:', error);
+            alert('Failed to parse archived XLSX file.');
+          }
+        };
+        reader.readAsBinaryString(file);
+      };
+
+      const assignedLpns = [...new Set(trackerData.map(entry => entry.lpn).filter(Boolean))];
+      const pendingLpnRecords = csvData.filter((row) => !assignedLpns.includes(row.LPN));
+      const pendingLpnCount = pendingLpnRecords.length;
+      const pendingLpnTotalQty = pendingLpnRecords.reduce((total, row) => {
+        return total + Object.keys(row)
+          .filter((key) => key !== 'LPN' && key !== 'Date' && row[key] && !isNaN(row[key]))
+          .reduce((sum, key) => sum + parseInt(row[key] || 0), 0);
+      }, 0);
+
+      const openLpns = trackerData.filter((entry) => !entry.endTime).length;
+      const pendingCompletionCount = pendingCompletion.length;
+      const totalItemsPending = trackerData
+        .filter((entry) => !entry.endTime)
+        .reduce((sum, entry) => sum + (entry.totalItems || 0), 0) +
+        pendingCompletion.reduce((sum, entry) => sum + (entry.totalItems || 0), 0);
+
+      const uniqueDates = [...new Set(trackerData.map(entry => entry.date).filter(Boolean))].sort();
+      const uniqueAssignDates = [...new Set(trackerData.map(entry => entry.assignDate).filter(Boolean))].sort();
+
+      const filteredData = trackerData.filter((entry) => {
+        const matchesDate = selectedDate ? (entry.date || '') === selectedDate : true;
+        const matchesLpn = lpnFilter ? (entry.lpn || '').toLowerCase().includes(lpnFilter.toLowerCase()) : true;
+        const matchesUser = userFilter ? (entry.user || '').toLowerCase().includes(userFilter.toLowerCase()) : true;
+        const matchesAssignDate = selectedAssignDate ? (entry.assignDate || '') === selectedAssignDate : true;
+        return matchesDate && matchesLpn && matchesUser && matchesAssignDate;
+      });
+
+      const filteredArchivedData = archivedData.filter((entry) => {
+        const matchesDate = selectedDate ? (entry.date || '') === selectedDate : true;
+        const matchesLpn = lpnFilter ? (entry.lpn || '').toLowerCase().includes(lpnFilter.toLowerCase()) : true;
+        const matchesUser = userFilter ? (entry.user || '').toLowerCase().includes(userFilter.toLowerCase()) : true;
+        const matchesAssignDate = selectedAssignDate ? (entry.assignDate || '') === selectedAssignDate : true;
+        return matchesDate && matchesLpn && matchesUser && matchesAssignDate;
+      });
+
+      return (
+        <div className="min-h-screen flex flex-col">
+ <div
+  className="relative w-full px-4 py-5 transition-all duration-300 hover:h-32 h-0 flex items-center"
+  style={{ backgroundColor: '#D40511' }}
+>
+  {/* Logo DHL à esquerda */}
+  <img
+    src="./DHL%20Logo.png"
+    alt="DHL Logo"
+    className="absolute left-4 h-8 object-contain"
+  />
+
+  {/* Título centralizado */}
+  <h1 className="absolute left-1/2 transform -translate-x-1/2 text-2xl font-bold text-white">
+    DHL-Selfridges Tagging Tracker
+  </h1>
+
+  {/* Controles à direita */}
+  <div className="flex items-center space-x-4 ml-auto">
+    <button
+      onClick={handleDownload}
+      className="text-white underline opacity-0 hover:opacity-100 transition-opacity duration-300"
+    >
+      Download Data
+    </button>
+    <span
+  className="text-white"
+  style={{ fontSize: '0.7rem' }}  /* ajuste para 0.5rem, 0.4rem, 0.6rem, etc */
+>
+  Victor Ribeiro (DHL Supply Chain)
+</span>
+
+  </div>
+</div>
+
+
+      <div className="flex flex-1">
+            <div className="w-64 p-4" style={{ backgroundColor: '#FFC107' }}>
+              <h2 className="text-xl font-bold mb-4 text-center" style={{ color: '#D40511' }}>
+                Control Panel
+              </h2>
+              <div className="mb-4">
+                <input
+                  type="file"
+                  accept=".csv"
+                  onChange={handleFileUpload}
+                  className="p-1 border rounded w-full"
+                  style={{ backgroundColor: '#FFD700', color: '#000000' }}
+                />
+              </div>
+              <div className="mb-4">
+                <button
+                  onClick={handleResetAllData}
+                  className="w-full p-1 rounded text-white shadow-md hover:shadow-lg transition-shadow duration-200"
+                  style={{ backgroundColor: '#D40511', borderRadius: '8px' }}
+                >
+                  Reset All Data
+                </button>
+              </div>
+              <div className="mb-4">
+                <button
+                  onClick={handleViewArchivedData}
+                  className="w-full p-1 rounded text-white shadow-md hover:shadow-lg transition-shadow duration-200"
+                  style={{ backgroundColor: '#D40511', borderRadius: '8px' }}
+                >
+                  View Archived Data
+                </button>
+              </div>
+              <div className="space-y-3">
+                <div className="flex items-center p-2 bg-white rounded-lg shadow-md">
+                  <span className="w-2 h-6 mr-2 rounded" style={{ backgroundColor: '#D40511' }}></span>
+                  <p className="text-sm font-semibold text-gray-800">
+                    Pending LPNs: <span className="text-black">{pendingLpnCount} / {pendingLpnTotalQty}</span>
+                  </p>
+                </div>
+                <div className="flex items-center p-2 bg-white rounded-lg shadow-md">
+                  <span className="w-2 h-6 mr-2 rounded" style={{ backgroundColor: '#D40511' }}></span>
+                  <p className="text-sm font-semibold text-gray-800">
+                    Open LPNs: <span className="text-black">{openLpns}</span>
+                  </p>
+                </div>
+                <div className="flex items-center p-2 bg-white rounded-lg shadow-md">
+                  <span className="w-2 h-6 mr-2 rounded" style={{ backgroundColor: '#D40511' }}></span>
+                  <p className="text-sm font-semibold text-gray-800">
+                    Pending Completion LPNs: <span className="text-black">{pendingCompletionCount}</span>
+                  </p>
+                </div>
+                <div className="flex items-center p-2 bg-white rounded-lg shadow-md">
+                  <span className="w-2 h-6 mr-2 rounded" style={{ backgroundColor: '#D40511' }}></span>
+                  <p className="text-sm font-semibold text-gray-800">
+                    Total Items: <span className="text-black">{totalItemsPending}</span>
+                  </p>
+                </div>
+              </div>
+              <div className="mt-4">
+                <h3 className="text-lg font-semibold mb-1" style={{ color: '#000000' }}>
+                  Pending Completion LPNs
+                </h3>
+                {pendingCompletion.map((entry, index) => (
+                  <div
+                    key={index}
+                    className="flex space-x-2 items-center p-1 border-b cursor-pointer hover:bg-red-300 bg-red-200"
+                    onClick={() => initiateEditPending(index)}
+                  >
+                    <p className="text-sm">
+                      LPN: {entry.lpn} - <span className="font-bold">Remaining:</span> {entry.totalItems}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex-1 p-6 bg-gray-100">
+              <div className="fixed-section">
+                <div className="mb-4">
+                  <button
+                    onClick={() => setIsAccordionOpen(!isAccordionOpen)}
+                    className="w-full p-1 rounded text-white shadow-md hover:shadow-lg transition-shadow duration-200 flex justify-between items-center"
+                    style={{ backgroundColor: '#D40511', borderRadius: '8px' }}
+                  >
+                    <span>{isAccordionOpen ? 'Hide LPN Scanner' : 'Show LPN Scanner'}</span>
+                    <span>{isAccordionOpen ? '▼' : '▲'}</span>
+                  </button>
+                </div>
+                <div
+                  className={`transition-all duration-300 overflow-hidden ${
+                    isAccordionOpen ? 'max-h-10' : 'max-h-0'
+                  }`}
+                >
+                  <div className="flex space-x-2 mb-2">
+                    <input
+                      type="text"
+                      placeholder="Scan or enter LPN"
+                      value={lpnInput}
+                      onChange={(e) => setLpnInput(e.target.value)}
+                      className="py-0.5 px-1 border rounded w-1/3"
+                      ref={lpnInputRef}
+                    />
+                    <button
+                      onClick={handleLpnScan}
+                      className="py-0.5 px-1 rounded text-white shadow-md hover:shadow-lg transition-shadow duration-200"
+                      style={{ backgroundColor: '#D40511', borderRadius: '8px' }}
+                    >
+                      Assign LPN
+                    </button>
+                    <input
+                      type="text"
+                      placeholder="Filter LPN"
+                      value={lpnFilter}
+                      onChange={(e) => setLpnFilter(e.target.value)}
+                      className="py-0.5 px-1 border rounded w-1/5"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Filter User"
+                      value={userFilter}
+                      onChange={(e) => setUserFilter(e.target.value)}
+                      className="py-0.5 px-1 border rounded w-1/5"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="table-container">
+                <table className="w-full border-collapse">
+                  <thead className="sticky-header">
+                    <tr>
+                      <th className="p-2 border">
+                        <div className="flex flex-col items-center">
+                          Date
+                          <select
+                            value={selectedDate}
+                            onChange={(e) => setSelectedDate(e.target.value)}
+                            className="mt-1 p-1 border rounded text-sm"
+                          >
+                            <option value="">All</option>
+                            {uniqueDates.map((date, index) => (
+                              <option key={index} value={date}>{date}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </th>
+                      <th className="p-2 border">LPN</th>
+                      <th className="p-2 border">User</th>
+                      <th className="p-2 border">Total Items</th>
+                      <th className="p-2 border">
+                        <div className="flex flex-col items-center">
+                          Assign Date
+                          <select
+                            value={selectedAssignDate}
+                            onChange={(e) => setSelectedAssignDate(e.target.value)}
+                            className="mt-1 p-1 border rounded text-sm"
+                          >
+                            <option value="">All</option>
+                            {uniqueAssignDates.map((date, index) => (
+                              <option key={index} value={date}>{date}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </th>
+                      <th className="p-2 border">Start Time</th>
+                      <th className="p-2 border">End Time</th>
+                      <th className="p-2 border">Total Time</th>
+                      <th className="p-2 border">Efficiency</th>
+                      <th className="p-2 border">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                  {filteredData.map((entry, index) => (
+  <tr key={index} style={{ backgroundColor: index % 2 === 0 ? '#FFD700' : '#FFFFFF' }}>
+    <td className="py-1 px-1 border text-sm">{entry.date}</td>
+    <td className="py-1 px-1 border text-sm">{entry.lpn}</td>
+    <td className="py-1 px-1 border text-sm">{entry.user}</td>
+    <td className="py-1 px-1 border text-sm">{entry.totalItems}</td>
+    <td className="py-1 px-1 border text-sm">{entry.assignDate}</td>
+    <td className="py-1 px-1 border text-sm">{entry.startTime}</td>
+    <td className="py-1 px-1 border text-sm">{entry.endTime}</td>
+    <td className="py-1 px-1 border text-sm">{entry.totalTime}</td>
+    <td className="py-1 px-1 border text-sm">{entry.efficiency}</td>
+    <td className="py-1 px-1 border-none flex items-center justify-center">
+      <button
+        onClick={() => initiateEndTagging(index)}
+        className="px-1 rounded text-white shadow-lg hover:shadow-xl transition-all duration-200 transform hover:-translate-y-0.5 active:translate-y-0.5 text-xs mt-0.5"
+        style={{
+          background: 'linear-gradient(145deg, #ff3333, #cc0000)',
+          borderRadius: '8px',
+          boxShadow: '3px 3px 8px rgba(0, 0, 0, 0.3), -3px -3px 8px rgba(255, 255, 249, 0.3)',
+        }}
+        disabled={entry.endTime !== ''}
+      >
+        End Tagging
+      </button>
+    </td>
+  </tr>
+))}
+                  </tbody>
+                </table>
+              </div>
+
+              {showUserModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+                  <div className="bg-white p-6 rounded shadow-lg">
+                    <h2 className="text-xl mb-4">Assign LPN: {selectedLpn?.LPN || ''}</h2>
+                    <input
+                      type="text"
+                      placeholder="Scan or enter user name"
+                      value={userInput}
+                      onChange={(e) => setUserInput(e.target.value)}
+                      className="p-2 border rounded w-full mb-4"
+                      ref={userInputRef}
+                    />
+                    <div className="flex justify-end space-x-4">
+                      <button
+                        onClick={handleCancelAssign}
+                        className="p-2 rounded shadow-md hover:shadow-lg transition-shadow duration-200"
+                        style={{ backgroundColor: '#000000', color: '#FFD700', borderRadius: '8px' }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleAssignUser}
+                        className="p-2 rounded text-white shadow-md hover:shadow-lg transition-shadow duration-200"
+                        style={{ backgroundColor: '#D40511', borderRadius: '8px' }}
+                      >
+                        Assign
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {showEndModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+                  <div className="bg-white p-6 rounded shadow-lg">
+                    <h2 className="text-xl mb-4">End Tagging for LPN: {trackerData[selectedEndIndex]?.lpn || ''}</h2>
+                    <p className="mb-2">Total Items: {trackerData[selectedEndIndex]?.totalItems || 0}</p>
+                    <input
+                      type="number"
+                      placeholder="Enter completed items"
+                      value={completedItems}
+                      onChange={(e) => setCompletedItems(e.target.value)}
+                      className="p-2 border rounded w-full mb-4"
+                    />
+                    <div className="flex justify-end space-x-4">
+                      <button
+                        onClick={() => setShowEndModal(false)}
+                        className="p-2 rounded shadow-md hover:shadow-lg transition-shadow duration-200"
+                        style={{ backgroundColor: '#000000', color: '#FFD700', borderRadius: '8px' }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleEndTagging}
+                        className="p-2 rounded text-white shadow-lg hover:shadow-xl transition-all duration-200 transform hover:-translate-y-0.5 active:translate-y-0.5"
+                        style={{
+                          background: 'linear-gradient(145deg, #ff3333, #cc0000)',
+                          borderRadius: '8px',
+                          boxShadow: '3px 3px 8px rgba(0, 0, 0, 0.3), -3px -3px 8px rgba(255, 255, 249, 0.3)',
+                        }}
+                      >
+                        Confirm
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {showEditModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+                  <div className="bg-white p-6 rounded shadow-lg">
+                    <h2 className="text-xl mb-4">Edit LPN: {pendingCompletion[selectedEditIndex]?.lpn || ''}</h2>
+                    {editGroups.map((group, index) => (
+                      <div key={index} className="flex items-center space-x-2 mb-2">
+                        <label>Group {group.group}:</label>
+                        <input
+                          type="number"
+                          value={group.qty || 0}
+                          onChange={(e) => {
+                            const updatedGroups = [...editGroups];
+                            updatedGroups[index].qty = parseInt(e.target.value) || 0;
+                            setEditGroups(updatedGroups);
+                          }}
+                          className="p-1 border rounded w-20"
+                        />
+                      </div>
+                    ))}
+                    <p className="mb-4">
+                      Total Remaining: {editGroups.reduce((sum, group) => sum + (group.qty || 0), 0)}
+                    </p>
+                    <div className="flex justify-end space-x-4">
+                      <button
+                        onClick={() => setShowEditModal(false)}
+                        className="p-2 rounded shadow-md hover:shadow-lg transition-shadow duration-200"
+                        style={{ backgroundColor: '#000000', color: '#FFD700', borderRadius: '8px' }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleEditPending}
+                        className="p-2 rounded text-white shadow-md hover:shadow-lg transition-shadow duration-200"
+                        style={{ backgroundColor: '#D40511', borderRadius: '8px' }}
+                      >
+                        Save
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {showPendingPopup && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+                  <div className="bg-white p-6 rounded shadow-lg">
+                    <h2 className="text-xl mb-4">Pending Completion LPNs</h2>
+                    {pendingCompletion.map((entry, index) => (
+                      <p key={index} className="mb-2 text-sm">
+                        LPN: {entry.lpn} - <span className="font-bold">Remaining:</span> {entry.totalItems}
+                      </p>
+                    ))}
+                    <div className="flex justify-end">
+                      <button
+                        onClick={() => setShowPendingPopup(false)}
+                        className="p-2 rounded text-white shadow-md hover:shadow-lg transition-shadow duration-200"
+                        style={{ backgroundColor: '#D40511', borderRadius: '8px' }}
+                      >
+                        Close
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {showArchivedModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+                  <div className="bg-white p-6 rounded shadow-lg w-3/4 max-h-[80vh] overflow-y-auto">
+                    <h2 className="text-xl mb-4">Archived Data</h2>
+                    <div className="mb-4">
+                      <input
+                        type="file"
+                        accept=".xlsx"
+                        onChange={handleLoadArchivedFile}
+                        className="p-2 border rounded w-full"
+                      />
+                    </div>
+                    {archivedData.length > 0 && (
+                      <div className="table-container">
+                        <table className="w-full border-collapse">
+                          <thead className="sticky-header">
+  <tr>
+    <th className="py-1 px-2 border">Date</th>
+    <th className="py-1 px-2 border">LPN</th>
+    <th className="py-1 px-2 border">User</th>
+    <th className="py-1 px-2 border">Total Items</th>
+    <th className="py-1 px-2 border">Assign Date</th>
+    <th className="py-1 px-2 border">Start Time</th>
+    <th className="py-1 px-2 border">End Time</th>
+    <th className="py-1 px-2 border">Total Time</th>
+    <th className="py-1 px-2 border">Efficiency</th>
+    <th className="py-1 px-2 border">Actions</th>
+  </tr>
+</thead>
+                          <tbody>
+                            {filteredArchivedData.map((entry, index) => (
+                              <tr key={index} style={{ backgroundColor: index % 2 === 0 ? '#FFD700' : '#FFFFFF' }}>
+                                <td className="py-0.5 px-1 border text-sm">{entry.date}</td>
+                                <td className="py-0.5 px-1 border text-sm">{entry.lpn}</td>
+                                <td className="py-0.5 px-1 border text-sm">{entry.user}</td>
+                                <td className="py-0.5 px-1 border text-sm">{entry.totalItems}</td>
+                                <td className="py-0.5 px-1 border text-sm">{entry.assignDate}</td>
+                                <td className="py-0.5 px-1 border text-sm">{entry.startTime}</td>
+                                <td className="py-0.5 px-1 border text-sm">{entry.endTime}</td>
+                                <td className="py-0.5 px-1 border text-sm">{entry.totalTime}</td>
+                                <td className="py-0.5 px-1 border text-sm">{entry.efficiency}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                    <div className="flex justify-end mt-4">
+                      <button
+                        onClick={() => {
+                          setShowArchivedModal(false);
+                          setArchivedData([]);
+                        }}
+                        className="p-2 rounded text-white shadow-md hover:shadow-lg transition-shadow duration-200"
+                        style={{ backgroundColor: '#D40511', borderRadius: '8px' }}
+                      >
+                        Close
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {showResetModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+                  <div className="bg-white p-6 rounded shadow-lg">
+                    <h2 className="text-xl mb-4">Confirm Reset All Data</h2>
+                    <p className="mb-4">Enter the security code to proceed:</p>
+                    <input
+                      type="password"
+                      placeholder="Enter security code"
+                      value={resetCode}
+                      onChange={(e) => setResetCode(e.target.value)}
+                      className="p-2 border rounded w-full mb-4"
+                    />
+                    <div className="flex justify-end space-x-4">
+                      <button
+                        onClick={() => {
+                          setShowResetModal(false);
+                          setResetCode('');
+                        }}
+                        className="p-2 rounded shadow-md hover:shadow-lg transition-shadow duration-200"
+                        style={{ backgroundColor: '#000000', color: '#FFD700', borderRadius: '8px' }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={confirmResetAllData}
+                        className="p-2 rounded text-white shadow-md hover:shadow-lg transition-shadow duration-200"
+                        style={{ backgroundColor: '#D40511', borderRadius: '8px' }}
+                      >
+                        Confirm
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    ReactDOM.render(
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>,
+      document.getElementById('root')
+    );
+  </script>
+</body>
+</html>
