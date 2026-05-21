@@ -1018,42 +1018,6 @@
       </ErrorBoundary>,
       document.getElementById('root')
     );
-    // Bloqueio de atalhos comuns (versão segura)
-document.addEventListener('keydown', e => {
-  const k = e.key.toLowerCase();
-  const ctrl = e.ctrlKey || e.metaKey;
-  const shift = e.shiftKey;
-
-  // verifica se está numa área permitida
-  const sel = window.getSelection && window.getSelection();
-  const selNode = sel && sel.anchorNode
-    ? (sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement)
-    : null;
-  const inAllow = (document.activeElement && document.activeElement.closest('.allow-copy')) ||
-                  (selNode && selNode.closest && selNode.closest('.allow-copy'));
-
-  // 1) SEMPRE bloquear ver código / DevTools, em qualquer lugar
-  if ((ctrl && k === 'u') || e.key === 'F12' || (ctrl && shift && ['i','j','c'].includes(k))) {
-    e.preventDefault();
-    e.stopPropagation();
-    return;
-  }
-
-  // 2) Fora das áreas copiáveis, bloquear copiar / selecionar / imprimir / salvar
-  if (!inAllow && ctrl && ['c','a','p','s'].includes(k)) {
-    e.preventDefault();
-    e.stopPropagation();
-    return;
-  }
-
-  // 3) Dentro das abas copiáveis, Ctrl+C/A/S/P funcionam normalmente
-}, { capture: true });
-
-
-</script>
-
-  <!-- ======= fim proteção mínima ======= -->
-
+  </script>
 </body>
 </html>
-
