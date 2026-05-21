@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -754,22 +755,18 @@
     <td className="py-1 px-1 border text-sm">{entry.totalTime}</td>
     <td className="py-1 px-1 border text-sm">{entry.efficiency}</td>
     <td className="py-1 px-1 border-none flex items-center justify-center">
-     <button
-  onClick={() => initiateEndTagging(index)}
-  className="px-1 rounded text-white shadow-lg hover:shadow-xl transition-all duration-200 transform hover:-translate-y-0.5 active:translate-y-0.5 text-xs mt-0.5"
-  style={{
-    background: entry.endTime !== ''
-      ? 'linear-gradient(145deg, #ff3333, #cc0000)'
-      : 'linear-gradient(145deg, #28a745, #1e7e34)',
-    borderRadius: '8px',
-    boxShadow: '3px 3px 8px rgba(0, 0, 0, 0.3), -3px -3px 8px rgba(255, 255, 249, 0.3)',
-    opacity: entry.endTime !== '' ? 0.75 : 1,
-    cursor: entry.endTime !== '' ? 'not-allowed' : 'pointer',
-  }}
-  disabled={entry.endTime !== ''}
->
-  End Tagging
-</button>
+      <button
+        onClick={() => initiateEndTagging(index)}
+        className="px-1 rounded text-white shadow-lg hover:shadow-xl transition-all duration-200 transform hover:-translate-y-0.5 active:translate-y-0.5 text-xs mt-0.5"
+        style={{
+          background: 'linear-gradient(145deg, #ff3333, #cc0000)',
+          borderRadius: '8px',
+          boxShadow: '3px 3px 8px rgba(0, 0, 0, 0.3), -3px -3px 8px rgba(255, 255, 249, 0.3)',
+        }}
+        disabled={entry.endTime !== ''}
+      >
+        End Tagging
+      </button>
     </td>
   </tr>
 ))}
