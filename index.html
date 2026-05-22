@@ -325,18 +325,18 @@
             .map((key) => ({ group: key, qty: parseInt(selectedLpn[key]) }));
         }
 
-        const newEntry = {
-          date: selectedLpn.Date || '',
-          lpn: selectedLpn.LPN || '',
-          user: userInput,
-          groups,
-          totalItems,
-          assignDate: new Date().toISOString().split('T')[0],
-          startTime: new Date().toLocaleTimeString(),
-          endTime: '',
-          totalTime: '',
-          efficiency: '',
-        };
+       const newEntry = {
+  date: selectedLpn.Date || '',
+  lpn: selectedLpn.LPN || '',
+  user: userInput,
+  groups,
+  totalItems,
+  assignDate: new Date().toISOString().split('T')[0],
+  startTime: new Date().toLocaleTimeString('en-GB', { hour12: false }),
+  endTime: '',
+  totalTime: '',
+  efficiency: '',
+};
         setTrackerData([...trackerData, newEntry]);
         setShowUserModal(false);
         setLpnInput('');
@@ -354,55 +354,96 @@
         setCompletedItems(trackerData[index]?.totalItems?.toString() || '');
         setShowEndModal(true);
       };
+const handleEndTagging = () => {
+  const updatedData = [...trackerData];
+  const entry = updatedData[selectedEndIndex];
+  const completed = parseInt(completedItems);
+  const total = entry.totalItems || 0;
 
-      const handleEndTagging = () => {
-        const updatedData = [...trackerData];
-        const entry = updatedData[selectedEndIndex];
-        const completed = parseInt(completedItems);
-        const total = entry.totalItems || 0;
+  if (isNaN(completed) || completed < 0 || completed > total) {
+    alert('Please enter a valid number of completed items.');
+    return;
+  }
 
-        if (isNaN(completed) || completed < 0 || completed > total) {
-          alert('Please enter a valid number of completed items.');
-          return;
-        }
+  const parseTimeToSeconds = (timeText) => {
+    if (!timeText) return null;
 
-        entry.totalItems = completed;
-        entry.endTime = new Date().toLocaleTimeString();
-        const start = new Date(`1970-01-01T${entry.startTime}Z`);
-        const end = new Date(`1970-01-01T${entry.endTime}Z`);
-        let diffMs = end - start;
-        if (diffMs < 0) diffMs += 24 * 60 * 60 * 1000;
-        const diffSec = Math.floor(diffMs / 1000);
-        const hours = Math.floor(diffSec / 3600);
-        const minutes = Math.floor((diffSec % 3600) / 60);
-        const seconds = diffSec % 60;
-        entry.totalTime = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-        const diffHrs = diffMs / (1000 * 60 * 60);
-        const efficiency = (completed / diffHrs).toFixed(2);
-        entry.efficiency = `${((efficiency / 60) * 100).toFixed(2)}%`;
+    let time = timeText.trim().toUpperCase();
+    const isPM = time.includes('PM');
+    const isAM = time.includes('AM');
 
-        if (completed < total) {
-          const remainingItems = total - completed;
-          const ratio = remainingItems / total;
-          const newGroups = (entry.groups || []).map((group) => ({
-            group: group.group,
-            qty: Math.round(group.qty * ratio),
-          })).filter((group) => group.qty > 0);
+    time = time.replace('AM', '').replace('PM', '').trim();
 
-          const pendingEntry = {
-            date: entry.date,
-            lpn: entry.lpn,
-            groups: newGroups,
-            totalItems: remainingItems,
-          };
-          setPendingCompletion([...pendingCompletion, pendingEntry]);
-        }
+    const parts = time.split(':').map(Number);
 
-        setTrackerData(updatedData);
-        setShowEndModal(false);
-        setCompletedItems('');
-      };
+    if (parts.length < 2 || parts.some(isNaN)) {
+      return null;
+    }
 
+    let hours = parts[0];
+    const minutes = parts[1] || 0;
+    const seconds = parts[2] || 0;
+
+    if (isPM && hours < 12) hours += 12;
+    if (isAM && hours === 12) hours = 0;
+
+    return (hours * 3600) + (minutes * 60) + seconds;
+  };
+
+  entry.totalItems = completed;
+  entry.endTime = new Date().toLocaleTimeString('en-GB', { hour12: false });
+
+  const startSeconds = parseTimeToSeconds(entry.startTime);
+  const endSeconds = parseTimeToSeconds(entry.endTime);
+
+  if (startSeconds === null || endSeconds === null) {
+    entry.totalTime = '00:00:00';
+    entry.efficiency = '0.00%';
+  } else {
+    let diffSec = endSeconds - startSeconds;
+
+    if (diffSec < 0) {
+      diffSec += 24 * 60 * 60;
+    }
+
+    const hours = Math.floor(diffSec / 3600);
+    const minutes = Math.floor((diffSec % 3600) / 60);
+    const seconds = diffSec % 60;
+
+    entry.totalTime = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+
+    const diffHrs = diffSec / 3600;
+
+    if (diffHrs > 0) {
+      const itemsPerHour = completed / diffHrs;
+      entry.efficiency = `${((itemsPerHour / 60) * 100).toFixed(2)}%`;
+    } else {
+      entry.efficiency = '0.00%';
+    }
+  }
+
+  if (completed < total) {
+    const remainingItems = total - completed;
+    const ratio = remainingItems / total;
+    const newGroups = (entry.groups || []).map((group) => ({
+      group: group.group,
+      qty: Math.round(group.qty * ratio),
+    })).filter((group) => group.qty > 0);
+
+    const pendingEntry = {
+      date: entry.date,
+      lpn: entry.lpn,
+      groups: newGroups,
+      totalItems: remainingItems,
+    };
+
+    setPendingCompletion([...pendingCompletion, pendingEntry]);
+  }
+
+  setTrackerData(updatedData);
+  setShowEndModal(false);
+  setCompletedItems('');
+};
       const initiateEditPending = (index) => {
         setSelectedEditIndex(index);
         setEditGroups((pendingCompletion[index]?.groups || []).map((group) => ({ ...group })));
