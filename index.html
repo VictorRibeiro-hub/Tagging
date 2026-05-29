@@ -362,7 +362,7 @@ LPN: row.lpn,
             .map((key) => ({ group: key, qty: parseInt(selectedLpn[key]) }));
         }
 
-        const newEntry = {
+const newEntry = {
   date: selectedLpn.Date || '',
   pickTime: selectedLpn.PickTime || selectedLpn['Pick Time'] || '',
   pickUser: selectedLpn.PickUser || selectedLpn['Pick User'] || '',
@@ -373,7 +373,7 @@ LPN: row.lpn,
   originalTotalItems: totalItems,
   completionStatus: 'open',
   assignDate: new Date().toISOString().split('T')[0],
-  startTime: new Date().toLocaleTimeString(),
+  startTime: getCurrentTimeString(),
   endTime: '',
   totalTime: '',
   efficiency: '',
@@ -389,7 +389,65 @@ LPN: row.lpn,
         setLpnInput('');
         setUserInput('');
       };
+const getCurrentTimeString = () => {
+  const now = new Date();
 
+  const hours = now.getHours().toString().padStart(2, '0');
+  const minutes = now.getMinutes().toString().padStart(2, '0');
+  const seconds = now.getSeconds().toString().padStart(2, '0');
+
+  return `${hours}:${minutes}:${seconds}`;
+};
+
+const parseTimeToSeconds = (timeValue) => {
+  if (!timeValue) return null;
+
+  let timeText = String(timeValue).trim();
+
+  if (!timeText) return null;
+
+  const amPmMatch = timeText.match(/\s?(AM|PM)$/i);
+  let isPM = false;
+  let isAM = false;
+
+  if (amPmMatch) {
+    isPM = amPmMatch[1].toUpperCase() === 'PM';
+    isAM = amPmMatch[1].toUpperCase() === 'AM';
+    timeText = timeText.replace(/\s?(AM|PM)$/i, '').trim();
+  }
+
+  const parts = timeText.split(':').map((part) => parseInt(part, 10));
+
+  if (parts.length < 2 || parts.some((part) => isNaN(part))) {
+    return null;
+  }
+
+  let hours = parts[0];
+  const minutes = parts[1];
+  const seconds = parts[2] || 0;
+
+  if (isPM && hours < 12) {
+    hours += 12;
+  }
+
+  if (isAM && hours === 12) {
+    hours = 0;
+  }
+
+  return (hours * 3600) + (minutes * 60) + seconds;
+};
+
+const formatSecondsToHHMMSS = (totalSeconds) => {
+  if (totalSeconds === null || totalSeconds === undefined || isNaN(totalSeconds)) {
+    return '';
+  }
+
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+};
       const initiateEndTagging = (entry) => {
   const realIndex = trackerData.findIndex((row) =>
     row.lpn === entry.lpn &&
@@ -423,25 +481,38 @@ if (isNaN(completed) || completed < 0 || completed > total) {
 entry.originalTotalItems = originalTotal;
 entry.totalItems = completed;
 entry.endDate = new Date().toISOString().split('T')[0];
-entry.endTime = new Date().toLocaleTimeString();
+entry.endTime = getCurrentTimeString();
 
 if (completed < total) {
   entry.completionStatus = 'partial';
 } else {
   entry.completionStatus = 'completed';
 }
-        const start = new Date(`1970-01-01T${entry.startTime}Z`);
-        const end = new Date(`1970-01-01T${entry.endTime}Z`);
-        let diffMs = end - start;
-        if (diffMs < 0) diffMs += 24 * 60 * 60 * 1000;
-        const diffSec = Math.floor(diffMs / 1000);
-        const hours = Math.floor(diffSec / 3600);
-        const minutes = Math.floor((diffSec % 3600) / 60);
-        const seconds = diffSec % 60;
-        entry.totalTime = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-        const diffHrs = diffMs / (1000 * 60 * 60);
-        const efficiency = (completed / diffHrs).toFixed(2);
-        entry.efficiency = `${((efficiency / 60) * 100).toFixed(2)}%`;
+
+const startSeconds = parseTimeToSeconds(entry.startTime);
+const endSeconds = parseTimeToSeconds(entry.endTime);
+
+if (startSeconds === null || endSeconds === null) {
+  entry.totalTime = '';
+  entry.efficiency = '';
+} else {
+  let diffSec = endSeconds - startSeconds;
+
+  if (diffSec < 0) {
+    diffSec += 24 * 60 * 60;
+  }
+
+  entry.totalTime = formatSecondsToHHMMSS(diffSec);
+
+  const diffHrs = diffSec / 3600;
+
+  if (diffHrs > 0) {
+    const itemsPerHour = completed / diffHrs;
+    entry.efficiency = `${itemsPerHour.toFixed(2)} items/h`;
+  } else {
+    entry.efficiency = '';
+  }
+}
 
         if (completed < total) {
           const remainingItems = total - completed;
