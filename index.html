@@ -1015,6 +1015,12 @@ const getEndTaggingButtonText = (entry) => {
   return 'Completed';
 };
 
+const getTrackerGroupsText = (entry) => {
+  return (entry.groups || [])
+    .map(group => group.group)
+    .join(', ');
+};
+
       return (
         <div className="min-h-screen flex flex-col">
  <div
@@ -1239,6 +1245,7 @@ const getEndTaggingButtonText = (entry) => {
 <th className="p-2 border">Pick User</th>
 <th className="p-2 border">Tagging User</th>
 <th className="p-2 border">Total Items</th>
+<th className="p-2 border">Groups</th>
                       <th className="p-2 border">
                         <div className="flex flex-col items-center">
                           Assign Date
@@ -1271,6 +1278,7 @@ const getEndTaggingButtonText = (entry) => {
 <td className="py-1 px-1 border text-sm">{entry.pickUser || ''}</td>
 <td className="py-1 px-1 border text-sm">{entry.user}</td>
 <td className="py-1 px-1 border text-sm">{entry.totalItems}</td>
+<td className="py-1 px-1 border text-sm">{getTrackerGroupsText(entry)}</td>
     <td className="py-1 px-1 border text-sm">{entry.assignDate}</td>
     <td className="py-1 px-1 border text-sm">{entry.startTime}</td>
     <td className="py-1 px-1 border text-sm">{entry.endTime}</td>
@@ -1701,7 +1709,7 @@ const getEndTaggingButtonText = (entry) => {
       document.getElementById('root')
     );
   </script>
-  <!-- ======= Proteção mínima (insere AQUI, antes de </body>) ======= -->
+<!-- ======= Proteção mínima (insere AQUI, antes de </body>) ======= -->
   <style>
   /* bloqueia seleção globalmente */
   * { -webkit-user-select: none; -ms-user-select: none; user-select: none; }
