@@ -10,7 +10,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.22.5/babel.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.10/dayjs.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
   <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
   <style>
     .sticky-header th {
@@ -179,32 +179,26 @@
           const filename = `archived_${timestamp}.xlsx`;
 
           // Preparar os dados para o XLSX
-          const wsData = toArchive.map(row => ({
-            Date: row.date,
-'Pick Time': row.pickTime || '',
-'Pick User': row.pickUser || '',
-LPN: row.lpn,
-'Tagging User': row.user,
-'Total Items': row.totalItems,
-            'Assign Date': row.assignDate,
-            'Start Time': row.startTime,
-            'End Time': row.endTime,
-            'Total Time': row.totalTime,
-            Efficiency: row.efficiency,
-          }));
+         const wsData = toArchive.map(row => ({
+  Date: row.date,
+  'Pick Time': row.pickTime || '',
+  'Pick User': row.pickUser || '',
+  LPN: row.lpn,
+  'Tagging User': row.user,
+  'Total Items': row.totalItems,
+  'Assign Date': row.assignDate,
+  'Start Time': row.startTime,
+  'End Time': row.endTime,
+  'Total Time': row.totalTime,
+  Efficiency: row.efficiency,
+  'Items / Hour': row.itemsPerHour || '',
+}));
 
           // Criar a planilha
-          const ws = XLSX.utils.json_to_sheet(wsData);
+const ws = XLSX.utils.json_to_sheet(wsData);
 
-          // Calcular a largura das colunas
-          const colWidths = Object.keys(wsData[0]).map((key, colIndex) => {
-            const maxLength = Math.max(
-              ...wsData.map(row => (row[key] || '').toString().length),
-              key.length
-            );
-            return { wch: maxLength + 2 }; // Adicionar um pequeno padding
-          });
-          ws['!cols'] = colWidths;
+// Aplicar estilo DHL / Selfridges
+applyDhlExcelStyle(ws, wsData, Object.keys(wsData[0] || {}));
 
           // Criar o workbook e adicionar a planilha
           const wb = XLSX.utils.book_new();
@@ -377,6 +371,7 @@ const newEntry = {
   endTime: '',
   totalTime: '',
   efficiency: '',
+itemsPerHour: '',
 };
         setTrackerData([...trackerData, newEntry]);
         setShowUserModal(false);
@@ -507,11 +502,17 @@ if (startSeconds === null || endSeconds === null) {
   const diffHrs = diffSec / 3600;
 
   if (diffHrs > 0) {
-    const itemsPerHour = completed / diffHrs;
-    entry.efficiency = `${itemsPerHour.toFixed(2)} items/h`;
-  } else {
-    entry.efficiency = '';
-  }
+  const itemsPerHour = completed / diffHrs;
+
+  // Original efficiency logic preserved
+  entry.efficiency = `${((itemsPerHour / 60) * 100).toFixed(2)}%`;
+
+  // New productivity metric
+  entry.itemsPerHour = `${Math.round(itemsPerHour)} items/h`;
+} else {
+  entry.efficiency = '';
+  entry.itemsPerHour = '';
+}
 }
 
         if (completed < total) {
@@ -560,44 +561,141 @@ if (startSeconds === null || endSeconds === null) {
         setShowEditModal(false);
       };
 
+      
+
+const applyDhlExcelStyle = (ws, dataRows, headerKeys) => {
+  if (!ws || !headerKeys || headerKeys.length === 0) return;
+  if (!ws['!ref']) return;
+
+  const range = XLSX.utils.decode_range(ws['!ref']);
+
+  const headerStyle = {
+    font: { bold: true, color: { rgb: '000000' } },
+    fill: { fgColor: { rgb: 'FFC107' } }, // DHL Yellow
+    alignment: { horizontal: 'center', vertical: 'center' },
+    border: {
+      top: { style: 'thin', color: { rgb: '000000' } },
+      bottom: { style: 'thin', color: { rgb: '000000' } },
+      left: { style: 'thin', color: { rgb: '000000' } },
+      right: { style: 'thin', color: { rgb: '000000' } },
+    },
+  };
+
+  const redHeaderStyle = {
+    font: { bold: true, color: { rgb: 'FFFFFF' } },
+    fill: { fgColor: { rgb: 'D40511' } }, // DHL Red
+    alignment: { horizontal: 'center', vertical: 'center' },
+    border: {
+      top: { style: 'thin', color: { rgb: '000000' } },
+      bottom: { style: 'thin', color: { rgb: '000000' } },
+      left: { style: 'thin', color: { rgb: '000000' } },
+      right: { style: 'thin', color: { rgb: '000000' } },
+    },
+  };
+
+  const normalStyle = {
+    alignment: { horizontal: 'center', vertical: 'center' },
+    border: {
+      top: { style: 'thin', color: { rgb: 'D9D9D9' } },
+      bottom: { style: 'thin', color: { rgb: 'D9D9D9' } },
+      left: { style: 'thin', color: { rgb: 'D9D9D9' } },
+      right: { style: 'thin', color: { rgb: 'D9D9D9' } },
+    },
+  };
+
+  const zebraStyle = {
+    ...normalStyle,
+    fill: { fgColor: { rgb: 'FFF2CC' } }, // soft yellow
+  };
+
+  // Header row
+  for (let C = range.s.c; C <= range.e.c; C++) {
+    const cellRef = XLSX.utils.encode_cell({ r: 0, c: C });
+
+    if (!ws[cellRef]) continue;
+
+    ws[cellRef].s = C % 2 === 0 ? headerStyle : redHeaderStyle;
+  }
+
+  // Data rows
+  for (let R = 1; R <= range.e.r; R++) {
+    for (let C = range.s.c; C <= range.e.c; C++) {
+      const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
+
+      if (!ws[cellRef]) continue;
+
+      ws[cellRef].s = R % 2 === 0 ? zebraStyle : normalStyle;
+    }
+  }
+
+  // Auto filter
+  ws['!autofilter'] = {
+    ref: XLSX.utils.encode_range(range),
+  };
+
+  // Column widths
+  ws['!cols'] = headerKeys.map((key) => {
+    const maxLength = Math.max(
+      key.length,
+      ...dataRows.map(row => (row[key] || '').toString().length)
+    );
+
+    return { wch: Math.min(Math.max(maxLength + 2, 12), 35) };
+  });
+};
+
       const handleDownload = () => {
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
         const filename = `tracker_data_${timestamp}.xlsx`;
-
         // Preparar os dados para o XLSX
         const wsData = trackerData.map(row => ({
-         Date: row.date,
-'Pick Time': row.pickTime || '',
-'Pick User': row.pickUser || '',
-LPN: row.lpn,
-'Tagging User': row.user,
-'Total Items': row.totalItems,
-          'Assign Date': row.assignDate,
-          'Start Time': row.startTime,
-          'End Time': row.endTime,
-          'Total Time': row.totalTime,
-          Efficiency: row.efficiency,
-        }));
+  Date: row.date,
+  'Pick Time': row.pickTime || '',
+  'Pick User': row.pickUser || '',
+  LPN: row.lpn,
+  'Tagging User': row.user,
+  'Total Items': row.totalItems,
+  'Assign Date': row.assignDate,
+  'Start Time': row.startTime,
+  'End Time': row.endTime,
+  'Total Time': row.totalTime,
+  Efficiency: row.efficiency,
+  'Items / Hour': row.itemsPerHour || '',
+}));
+// Criar a planilha
+const ws = XLSX.utils.json_to_sheet(wsData);
 
-        // Criar a planilha
-        const ws = XLSX.utils.json_to_sheet(wsData);
+// Aplicar estilo DHL / Selfridges
+applyDhlExcelStyle(ws, wsData, Object.keys(wsData[0] || {}));
+        // Criar o workbook e adicionar a planilha Tracker
+const wb = XLSX.utils.book_new();
+XLSX.utils.book_append_sheet(wb, ws, 'Tracker Data');
 
-        // Calcular a largura das colunas
-        const colWidths = Object.keys(wsData[0]).map((key, colIndex) => {
-          const maxLength = Math.max(
-            ...wsData.map(row => (row[key] || '').toString().length),
-            key.length
-          );
-          return { wch: maxLength + 2 };
-        });
-        ws['!cols'] = colWidths;
+// ======================================================
+// Criar folha Summary no mesmo ficheiro
+// ======================================================
+const summaryWsData = summaryRows.map(row => ({
+  Date: row.date,
+  'Pick Time': row.pickTime || '',
+  'Pick User': row.pickUser || '',
+  LPN: row.lpn,
+  Qty: row.qty,
+  Groups: row.groups,
+  'Tagging User': row.taggingUser,
+  Status: row.status,
+  'Age Hours': formatAgeHoursWithDays(row.ageHours),
+}));
 
-        // Criar o workbook e adicionar a planilha
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'Tracker Data');
+const summaryWs = XLSX.utils.json_to_sheet(summaryWsData);
 
-        // Gerar o arquivo XLSX e disparar o download
-        XLSX.writeFile(wb, filename);
+// Aplicar estilo DHL / Selfridges na Summary
+applyDhlExcelStyle(summaryWs, summaryWsData, Object.keys(summaryWsData[0] || {}));
+
+
+XLSX.utils.book_append_sheet(wb, summaryWs, 'Summary');
+
+// Gerar o arquivo XLSX e disparar o download
+XLSX.writeFile(wb, filename);
       };
 
       const handleViewArchivedData = () => {
@@ -628,6 +726,7 @@ user: row['Tagging User'] || row.User || '',
               endTime: row['End Time'] || '',
               totalTime: row['Total Time'] || '',
               efficiency: row.Efficiency || '',
+itemsPerHour: row['Items / Hour'] || '',
             })));
           } catch (error) {
             console.error('Error parsing archived XLSX:', error);
@@ -749,12 +848,13 @@ const formatAgeHoursWithDays = (hours) => {
   if (hours === null || hours === undefined || isNaN(hours)) return '';
 
   const days = hours / 24;
+  const roundedDays = Math.round(days);
 
   if (hours < 24) {
     return `${hours.toFixed(1)} hrs`;
   }
 
-  return `${hours.toFixed(1)} hrs · ${days.toFixed(1)}d`;
+  return `${hours.toFixed(1)} hrs · ${roundedDays}d`;
 };
 
 const getLpnStatus = (csvRow) => {
@@ -1158,6 +1258,7 @@ const getEndTaggingButtonText = (entry) => {
                       <th className="p-2 border">End Time</th>
                       <th className="p-2 border">Total Time</th>
                       <th className="p-2 border">Efficiency</th>
+                      <th className="p-2 border">Items / Hour</th>
                       <th className="p-2 border">Actions</th>
                     </tr>
                   </thead>
@@ -1175,7 +1276,8 @@ const getEndTaggingButtonText = (entry) => {
     <td className="py-1 px-1 border text-sm">{entry.endTime}</td>
     <td className="py-1 px-1 border text-sm">{entry.totalTime}</td>
     <td className="py-1 px-1 border text-sm">{entry.efficiency}</td>
-    <td className="py-1 px-1 border-none flex items-center justify-center">
+<td className="py-1 px-1 border text-sm">{entry.itemsPerHour || ''}</td>
+<td className="py-1 px-1 border-none flex items-center justify-center">
       <button
   onClick={() => initiateEndTagging(entry)}
   className="px-2 py-0.5 rounded text-white shadow-lg hover:shadow-xl transition-all duration-200 transform hover:-translate-y-0.5 active:translate-y-0.5 text-xs mt-0.5"
