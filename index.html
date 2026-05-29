@@ -1701,5 +1701,74 @@ const getEndTaggingButtonText = (entry) => {
       document.getElementById('root')
     );
   </script>
+  <!-- ======= Proteção mínima (insere AQUI, antes de </body>) ======= -->
+  <style>
+  /* bloqueia seleção globalmente */
+  * { -webkit-user-select: none; -ms-user-select: none; user-select: none; }
+
+  /* libera em inputs/selects */
+  input, textarea, select {
+    -webkit-user-select: text; -ms-user-select: text; user-select: text;
+  }
+
+  /* libera dentro das abas (Home, Gaps, etc.) */
+  .allow-copy, .allow-copy * {
+    -webkit-user-select: text !important;
+    -ms-user-select: text !important;
+    user-select: text !important;
+  }
+</style>
+
+
+  <script>
+  // Bloqueios leves: contexto, seleção, arrasto
+  document.addEventListener('contextmenu', e => {
+  if (e.target.closest('.allow-copy')) return; // permite nas áreas liberadas
+  e.preventDefault();
+}, { capture: true });
+
+document.addEventListener('selectstart', e => {
+  if (e.target.closest('.allow-copy')) return; // permite seleção nas abas liberadas
+  if (/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
+  e.preventDefault();
+}, { capture: true });
+
+  document.addEventListener('dragstart', e => e.preventDefault(), { capture: true });
+
+  // Bloqueio de atalhos comuns (versão segura)
+document.addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  const ctrl = e.ctrlKey || e.metaKey;
+  const shift = e.shiftKey;
+
+  // verifica se está numa área permitida
+  const sel = window.getSelection && window.getSelection();
+  const selNode = sel && sel.anchorNode
+    ? (sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement)
+    : null;
+  const inAllow = (document.activeElement && document.activeElement.closest('.allow-copy')) ||
+                  (selNode && selNode.closest && selNode.closest('.allow-copy'));
+
+  // 1) SEMPRE bloquear ver código / DevTools, em qualquer lugar
+  if ((ctrl && k === 'u') || e.key === 'F12' || (ctrl && shift && ['i','j','c'].includes(k))) {
+    e.preventDefault();
+    e.stopPropagation();
+    return;
+  }
+
+  // 2) Fora das áreas copiáveis, bloquear copiar / selecionar / imprimir / salvar
+  if (!inAllow && ctrl && ['c','a','p','s'].includes(k)) {
+    e.preventDefault();
+    e.stopPropagation();
+    return;
+  }
+
+  // 3) Dentro das abas copiáveis, Ctrl+C/A/S/P funcionam normalmente
+}, { capture: true });
+
+
+</script>
+
+  <!-- ======= fim proteção mínima ======= -->
 </body>
 </html>
