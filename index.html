@@ -569,134 +569,823 @@ const applyDhlExcelStyle = (ws, dataRows, headerKeys) => {
 
   const range = XLSX.utils.decode_range(ws['!ref']);
 
+  // ======================================================
+  // PREMIUM HEADER STYLE
+  // Dark graphite background + soft gold font
+  // This gives a premium DHL / Selfridges look without copying
+  // the same exact colours from the other report.
+  // ======================================================
   const headerStyle = {
-    font: { bold: true, color: { rgb: '000000' } },
-    fill: { fgColor: { rgb: 'FFC107' } }, // DHL Yellow
-    alignment: { horizontal: 'center', vertical: 'center' },
+    font: {
+      bold: true,
+      color: { rgb: 'F9D65C' }, // premium gold
+    },
+    fill: {
+      fgColor: { rgb: '1F2933' }, // dark graphite
+    },
+    alignment: {
+      horizontal: 'center',
+      vertical: 'center',
+      wrapText: true,
+    },
     border: {
-      top: { style: 'thin', color: { rgb: '000000' } },
-      bottom: { style: 'thin', color: { rgb: '000000' } },
-      left: { style: 'thin', color: { rgb: '000000' } },
-      right: { style: 'thin', color: { rgb: '000000' } },
+      top: { style: 'thin', color: { rgb: '111827' } },
+      bottom: { style: 'thin', color: { rgb: 'D40511' } }, // subtle DHL red line
+      left: { style: 'thin', color: { rgb: '111827' } },
+      right: { style: 'thin', color: { rgb: '111827' } },
     },
   };
 
-  const redHeaderStyle = {
-    font: { bold: true, color: { rgb: 'FFFFFF' } },
-    fill: { fgColor: { rgb: 'D40511' } }, // DHL Red
-    alignment: { horizontal: 'center', vertical: 'center' },
-    border: {
-      top: { style: 'thin', color: { rgb: '000000' } },
-      bottom: { style: 'thin', color: { rgb: '000000' } },
-      left: { style: 'thin', color: { rgb: '000000' } },
-      right: { style: 'thin', color: { rgb: '000000' } },
-    },
-  };
-
+  // ======================================================
+  // NORMAL DATA STYLE
+  // Clean white rows with light borders
+  // ======================================================
   const normalStyle = {
-    alignment: { horizontal: 'center', vertical: 'center' },
+    alignment: {
+      horizontal: 'center',
+      vertical: 'center',
+      wrapText: true,
+    },
     border: {
-      top: { style: 'thin', color: { rgb: 'D9D9D9' } },
-      bottom: { style: 'thin', color: { rgb: 'D9D9D9' } },
-      left: { style: 'thin', color: { rgb: 'D9D9D9' } },
-      right: { style: 'thin', color: { rgb: 'D9D9D9' } },
+      top: { style: 'thin', color: { rgb: 'E5E7EB' } },
+      bottom: { style: 'thin', color: { rgb: 'E5E7EB' } },
+      left: { style: 'thin', color: { rgb: 'E5E7EB' } },
+      right: { style: 'thin', color: { rgb: 'E5E7EB' } },
     },
   };
 
+  // ======================================================
+  // ZEBRA ROW STYLE
+  // Soft champagne yellow, less aggressive than DHL yellow
+  // ======================================================
   const zebraStyle = {
     ...normalStyle,
-    fill: { fgColor: { rgb: 'FFF2CC' } }, // soft yellow
+    fill: {
+      fgColor: { rgb: 'FFF7D6' }, // soft champagne yellow
+    },
   };
 
-  // Header row
+  // ======================================================
+  // EXCEPTION STYLE
+  // Used when the cell text indicates a problem / risk
+  // ======================================================
+  const exceptionStyle = {
+    ...normalStyle,
+    fill: {
+      fgColor: { rgb: 'FDE2E2' }, // soft red
+    },
+    font: {
+      color: { rgb: '991B1B' }, // dark red text
+      bold: true,
+    },
+  };
+
+  // ======================================================
+  // HEADER ROW FORMAT
+  // Applies the same premium header style to all columns
+  // ======================================================
   for (let C = range.s.c; C <= range.e.c; C++) {
     const cellRef = XLSX.utils.encode_cell({ r: 0, c: C });
 
     if (!ws[cellRef]) continue;
 
-    ws[cellRef].s = C % 2 === 0 ? headerStyle : redHeaderStyle;
+    ws[cellRef].s = headerStyle;
   }
 
-  // Data rows
+  // ======================================================
+  // DATA ROW FORMAT
+  // Applies zebra style and highlights exceptions
+  // ======================================================
   for (let R = 1; R <= range.e.r; R++) {
     for (let C = range.s.c; C <= range.e.c; C++) {
       const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
 
       if (!ws[cellRef]) continue;
 
-      ws[cellRef].s = R % 2 === 0 ? zebraStyle : normalStyle;
+      const cellText = String(ws[cellRef].v || '').toLowerCase();
+
+      if (
+        cellText.includes('over 24h') ||
+        cellText.includes('urgent') ||
+        cellText.includes('review required') ||
+        cellText.includes('> 7 days') ||
+        cellText.includes('> 24h') ||
+        cellText.includes('pending completion')
+      ) {
+        ws[cellRef].s = exceptionStyle;
+      } else {
+        ws[cellRef].s = R % 2 === 0 ? zebraStyle : normalStyle;
+      }
     }
   }
 
-  // Auto filter
+  // ======================================================
+  // AUTO FILTER
+  // Adds filter arrows to the header row
+  // ======================================================
   ws['!autofilter'] = {
     ref: XLSX.utils.encode_range(range),
   };
 
-  // Column widths
+  // ======================================================
+  // IMPROVED COLUMN WIDTHS
+  // This is not real Excel AutoFit, but it calculates a better
+  // width based on the header and the content in each column.
+  //
+  // Previous version:
+  // min width: 12
+  // max width: 35
+  //
+  // New version:
+  // min width: 14
+  // max width: 55
+  //
+  // This helps avoid squeezed columns.
+  // ======================================================
   ws['!cols'] = headerKeys.map((key) => {
     const maxLength = Math.max(
       key.length,
       ...dataRows.map(row => (row[key] || '').toString().length)
     );
 
-    return { wch: Math.min(Math.max(maxLength + 2, 12), 35) };
+    return {
+      wch: Math.min(Math.max(maxLength + 4, 14), 55),
+    };
+  });
+
+  // ======================================================
+  // HEADER ROW HEIGHT
+  // Gives breathing room when headers wrap text
+  // ======================================================
+  ws['!rows'] = ws['!rows'] || [];
+  ws['!rows'][0] = { hpt: 28 };
+};
+const parseExcelDate = (value) => {
+  if (!value) return null;
+
+  const text = String(value).trim();
+
+  // DD/MM/YYYY
+  const ukMatch = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (ukMatch) {
+    const day = parseInt(ukMatch[1], 10);
+    const month = parseInt(ukMatch[2], 10) - 1;
+    const year = parseInt(ukMatch[3], 10);
+    return new Date(year, month, day);
+  }
+
+  // YYYY-MM-DD
+  const isoMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) {
+    const year = parseInt(isoMatch[1], 10);
+    const month = parseInt(isoMatch[2], 10) - 1;
+    const day = parseInt(isoMatch[3], 10);
+    return new Date(year, month, day);
+  }
+
+  return null;
+};
+
+const applyDateColumns = (ws, headerKeys, dateHeaders) => {
+  if (!ws || !ws['!ref']) return;
+
+  const range = XLSX.utils.decode_range(ws['!ref']);
+
+  dateHeaders.forEach((headerName) => {
+    const colIndex = headerKeys.indexOf(headerName);
+
+    if (colIndex === -1) return;
+
+    for (let R = 1; R <= range.e.r; R++) {
+      const cellRef = XLSX.utils.encode_cell({ r: R, c: colIndex });
+      const cell = ws[cellRef];
+
+      if (!cell || !cell.v) continue;
+
+      const parsedDate = parseExcelDate(cell.v);
+
+      if (parsedDate) {
+        cell.t = 'd';
+        cell.v = parsedDate;
+        cell.z = 'dd/mm/yyyy';
+      }
+    }
   });
 };
 
-      const handleDownload = () => {
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const filename = `tracker_data_${timestamp}.xlsx`;
-        // Preparar os dados para o XLSX
-        const wsData = trackerData.map(row => ({
-  Date: row.date,
-  'Pick Time': row.pickTime || '',
-  'Pick User': row.pickUser || '',
-  LPN: row.lpn,
-  'Tagging User': row.user,
-  'Total Items': row.totalItems,
-  'Assign Date': row.assignDate,
-  'Start Time': row.startTime,
-  'End Time': row.endTime,
-  'Total Time': row.totalTime,
-  Efficiency: row.efficiency,
-  'Items / Hour': row.itemsPerHour || '',
-}));
-// Criar a planilha
-const ws = XLSX.utils.json_to_sheet(wsData);
+const getStoreFromLpn = (lpn) => {
+  const prefix = String(lpn || '').substring(0, 2).toUpperCase();
 
-// Aplicar estilo DHL / Selfridges
-applyDhlExcelStyle(ws, wsData, Object.keys(wsData[0] || {}));
-        // Criar o workbook e adicionar a planilha Tracker
-const wb = XLSX.utils.book_new();
-XLSX.utils.book_append_sheet(wb, ws, 'Tracker Data');
+  if (prefix === 'OX') return 'OXFORD';
+  if (prefix === 'BR') return 'BIRMINGHAM';
+  if (prefix === 'TR') return 'TRAFFORD';
+  if (prefix === 'ME') return 'EXCHANGE';
 
-// ======================================================
-// Criar folha Summary no mesmo ficheiro
-// ======================================================
-const summaryWsData = summaryRows.map(row => ({
-  Date: row.date,
-  'Pick Time': row.pickTime || '',
-  'Pick User': row.pickUser || '',
-  LPN: row.lpn,
-  Qty: row.qty,
-  Groups: row.groups,
-  'Tagging User': row.taggingUser,
-  Status: row.status,
-  'Age Hours': formatAgeHoursWithDays(row.ageHours),
-}));
+  return 'UNKNOWN';
+};
 
-const summaryWs = XLSX.utils.json_to_sheet(summaryWsData);
+const parseItemsPerHourNumber = (value) => {
+  if (!value) return 0;
 
-// Aplicar estilo DHL / Selfridges na Summary
-applyDhlExcelStyle(summaryWs, summaryWsData, Object.keys(summaryWsData[0] || {}));
+  const match = String(value).match(/[\d.]+/);
+  return match ? parseFloat(match[0]) : 0;
+};
 
+const parseEfficiencyNumber = (value) => {
+  if (!value) return 0;
 
-XLSX.utils.book_append_sheet(wb, summaryWs, 'Summary');
+  const match = String(value).match(/[\d.]+/);
+  return match ? parseFloat(match[0]) : 0;
+};
 
-// Gerar o arquivo XLSX e disparar o download
-XLSX.writeFile(wb, filename);
+const parseTotalTimeToSeconds = (value) => {
+  if (!value) return 0;
+
+  const parts = String(value).split(':').map(part => parseInt(part, 10));
+
+  if (parts.length !== 3 || parts.some(isNaN)) return 0;
+
+  return (parts[0] * 3600) + (parts[1] * 60) + parts[2];
+};
+
+const formatSecondsToTimeText = (seconds) => {
+  if (!seconds || isNaN(seconds)) return '';
+
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+
+  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+};
+
+const getAverage = (values) => {
+  const cleanValues = values.filter(value => value !== null && value !== undefined && !isNaN(value));
+
+  if (cleanValues.length === 0) return 0;
+
+  return cleanValues.reduce((sum, value) => sum + value, 0) / cleanValues.length;
+};
+
+const createStyledSheet = (wb, sheetName, dataRows, dateHeaders = []) => {
+  const ws = XLSX.utils.json_to_sheet(dataRows);
+  const headerKeys = Object.keys(dataRows[0] || {});
+
+  applyDhlExcelStyle(ws, dataRows, headerKeys);
+  applyDateColumns(ws, headerKeys, dateHeaders);
+
+  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+
+  return ws;
+};
+
+const buildStoreAnalysisRows = (summaryRows) => {
+  const storeMap = {};
+
+  summaryRows.forEach(row => {
+    const store = getStoreFromLpn(row.lpn);
+
+    if (!storeMap[store]) {
+      storeMap[store] = {
+        Store: store,
+        LPNs: 0,
+        Qty: 0,
+        Completed: 0,
+        Open: 0,
+        Partial: 0,
+        'Over 24h': 0,
+        'Not Started': 0,
       };
+    }
+
+    storeMap[store].LPNs += 1;
+    storeMap[store].Qty += parseInt(row.qty || 0, 10);
+
+    if (row.status === 'Completed') storeMap[store].Completed += 1;
+    else if (row.status === 'Open') storeMap[store].Open += 1;
+    else if (row.status === 'Partial') storeMap[store].Partial += 1;
+    else if (row.status === 'Over 24h') storeMap[store]['Over 24h'] += 1;
+    else if (row.status === 'Not Started') storeMap[store]['Not Started'] += 1;
+  });
+
+  const totalQty = Object.values(storeMap).reduce((sum, row) => sum + row.Qty, 0);
+
+  return Object.values(storeMap).map(row => ({
+    ...row,
+    'Qty Share': totalQty > 0 ? `${((row.Qty / totalQty) * 100).toFixed(1)}%` : '0%',
+    'Visual Bar': '█'.repeat(Math.min(30, Math.round((row.Qty / Math.max(totalQty, 1)) * 30))),
+  }));
+};
+
+const buildUserPerformanceRows = (trackerData) => {
+  const userMap = {};
+
+  trackerData.forEach(row => {
+    const user = row.user || 'Unknown';
+
+    if (!userMap[user]) {
+      userMap[user] = {
+        User: user,
+        'LPNs Worked': 0,
+        'Completed LPNs': 0,
+        'Partial LPNs': 0,
+        'Qty Processed': 0,
+        itemsPerHourValues: [],
+        efficiencyValues: [],
+        timeValues: [],
+      };
+    }
+
+    userMap[user]['LPNs Worked'] += 1;
+    userMap[user]['Qty Processed'] += parseInt(row.totalItems || 0, 10);
+
+    if (row.completionStatus === 'completed') userMap[user]['Completed LPNs'] += 1;
+    if (row.completionStatus === 'partial') userMap[user]['Partial LPNs'] += 1;
+
+    const iph = parseItemsPerHourNumber(row.itemsPerHour);
+    const eff = parseEfficiencyNumber(row.efficiency);
+    const timeSeconds = parseTotalTimeToSeconds(row.totalTime);
+
+    if (iph > 0) userMap[user].itemsPerHourValues.push(iph);
+    if (eff > 0) userMap[user].efficiencyValues.push(eff);
+    if (timeSeconds > 0) userMap[user].timeValues.push(timeSeconds);
+  });
+
+  return Object.values(userMap).map(row => ({
+    User: row.User,
+    'LPNs Worked': row['LPNs Worked'],
+    'Completed LPNs': row['Completed LPNs'],
+    'Partial LPNs': row['Partial LPNs'],
+    'Qty Processed': row['Qty Processed'],
+    'Avg Items / Hour': Math.round(getAverage(row.itemsPerHourValues)),
+    'Avg Efficiency': `${getAverage(row.efficiencyValues).toFixed(2)}%`,
+    'Avg Total Time': formatSecondsToTimeText(getAverage(row.timeValues)),
+  })).sort((a, b) => b['Qty Processed'] - a['Qty Processed']);
+};
+
+const buildExceptionsRows = (summaryRows, pendingCompletion) => {
+  const summaryExceptions = summaryRows
+    .filter(row => row.status !== 'Completed')
+    .map(row => ({
+      Type: row.status,
+      Date: row.date,
+      'Pick Time': row.pickTime || '',
+      'Pick User': row.pickUser || '',
+      LPN: row.lpn,
+      Qty: row.qty,
+      Groups: row.groups,
+      'Tagging User': row.taggingUser || '',
+      'Age Hours': formatAgeHoursWithDays(row.ageHours),
+      Action: row.status === 'Over 24h'
+        ? 'Urgent review required'
+        : row.status === 'Partial'
+          ? 'Pending remaining quantity'
+          : row.status === 'Open'
+            ? 'Currently in progress'
+            : 'Not yet started',
+    }));
+
+  const pendingRows = pendingCompletion.map(row => ({
+    Type: 'Pending Completion',
+    Date: row.date || '',
+    'Pick Time': row.pickTime || '',
+    'Pick User': row.pickUser || '',
+    LPN: row.lpn,
+    Qty: row.totalItems,
+    Groups: (row.groups || []).map(group => group.group).join(', '),
+    'Tagging User': '',
+    'Age Hours': '',
+    Action: 'Complete remaining quantity',
+  }));
+
+  return [...summaryExceptions, ...pendingRows];
+};
+const getCsvAgeHoursFromRow = (row) => {
+  const pickDateTime = buildDateTime(
+    row.date || row.Date || '',
+    row.pickTime || row.PickTime || row['Pick Time'] || ''
+  );
+
+  if (!pickDateTime) return null;
+
+  const diffMs = new Date() - pickDateTime;
+
+  if (diffMs < 0) return null;
+
+  return diffMs / (1000 * 60 * 60);
+};
+
+const getCsvRiskLevel = (ageHours) => {
+  if (ageHours === null || ageHours === undefined || isNaN(ageHours)) {
+    return 'Unknown';
+  }
+
+  if (ageHours > 168) {
+    return 'Critical > 7 days';
+  }
+
+  if (ageHours > 24) {
+    return 'Attention > 24h';
+  }
+
+  return 'OK <= 24h';
+};
+
+const getCsvPossibleCause = (riskLevel) => {
+  if (riskLevel === 'Critical > 7 days') {
+    return 'Check if LPN was missed, sent without tagging, or not transferred to tagging area';
+  }
+
+  if (riskLevel === 'Attention > 24h') {
+    return 'Review tagging queue and confirm physical location';
+  }
+
+  if (riskLevel === 'OK <= 24h') {
+    return 'Within expected window';
+  }
+
+  return 'Pick date/time missing or invalid';
+};
+
+const buildCsvAgingDetailRows = (summaryRows) => {
+  return summaryRows.map(row => {
+    const csvAgeHours = getCsvAgeHoursFromRow(row);
+    const riskLevel = getCsvRiskLevel(csvAgeHours);
+
+    return {
+      Date: row.date,
+      'Pick Time': row.pickTime || '',
+      'Pick User': row.pickUser || '',
+      LPN: row.lpn,
+      Store: getStoreFromLpn(row.lpn),
+      Qty: row.qty,
+      Groups: row.groups,
+      Status: row.status,
+      'CSV Age': formatAgeHoursWithDays(csvAgeHours),
+      'CSV Age Hours': csvAgeHours !== null ? Number(csvAgeHours.toFixed(1)) : '',
+      'Risk Level': riskLevel,
+      'Possible Cause': getCsvPossibleCause(riskLevel),
+    };
+  }).sort((a, b) => {
+    const ageA = parseFloat(a['CSV Age Hours']) || 0;
+    const ageB = parseFloat(b['CSV Age Hours']) || 0;
+
+    return ageB - ageA;
+  });
+};
+
+const buildCsvAgingByStoreRows = (summaryRows) => {
+  const detailRows = buildCsvAgingDetailRows(summaryRows);
+
+  const stores = ['OXFORD', 'BIRMINGHAM', 'TRAFFORD', 'EXCHANGE'];
+
+  return stores.map(store => {
+    const storeRows = detailRows.filter(row => row.Store === store);
+
+    const over24Rows = storeRows.filter(row => {
+      const age = parseFloat(row['CSV Age Hours']) || 0;
+      return age > 24;
+    });
+
+    const over7DaysRows = storeRows.filter(row => {
+      const age = parseFloat(row['CSV Age Hours']) || 0;
+      return age > 168;
+    });
+
+    const oldestRow = storeRows
+      .slice()
+      .sort((a, b) => {
+        const ageA = parseFloat(a['CSV Age Hours']) || 0;
+        const ageB = parseFloat(b['CSV Age Hours']) || 0;
+
+        return ageB - ageA;
+      })[0];
+
+    let riskLevel = 'OK';
+    let operationalNote = 'Within expected window';
+
+    if (over7DaysRows.length > 0) {
+      riskLevel = 'Critical';
+      operationalNote = 'Critical review required: check missed LPNs, possible dispatch without tagging, or gap between Pick and Tagging.';
+    } else if (over24Rows.length > 0) {
+      riskLevel = 'Attention';
+      operationalNote = 'Review tagging queue and physical location: LPNs are older than 24h from Pick Date/Time.';
+    }
+
+    return {
+      Store: store,
+      'Total LPNs': storeRows.length,
+      'Total Qty': storeRows.reduce((sum, row) => sum + (parseInt(row.Qty, 10) || 0), 0),
+      '>24h LPNs': over24Rows.length,
+      '>24h Qty': over24Rows.reduce((sum, row) => sum + (parseInt(row.Qty, 10) || 0), 0),
+      '>7 Days LPNs': over7DaysRows.length,
+      '>7 Days Qty': over7DaysRows.reduce((sum, row) => sum + (parseInt(row.Qty, 10) || 0), 0),
+      'Oldest LPN': oldestRow ? oldestRow.LPN : '',
+      'Oldest Age': oldestRow ? oldestRow['CSV Age'] : '',
+      'Risk Level': riskLevel,
+      'Operational Note': operationalNote,
+    };
+  });
+};
+
+const buildCsvAgingKpiRows = (summaryRows) => {
+  const detailRows = buildCsvAgingDetailRows(summaryRows);
+
+  const over24Rows = detailRows.filter(row => {
+    const age = parseFloat(row['CSV Age Hours']) || 0;
+    return age > 24;
+  });
+
+  const over7DaysRows = detailRows.filter(row => {
+    const age = parseFloat(row['CSV Age Hours']) || 0;
+    return age > 168;
+  });
+
+  const oldestRow = detailRows[0];
+
+  return [
+    {
+      KPI: 'Total LPNs in Current CSV Report',
+      Value: detailRows.length,
+      Meaning: 'Total LPNs currently present in the BlueYonder CSV report',
+    },
+    {
+      KPI: 'LPNs > 24h from Pick Date/Time',
+      Value: over24Rows.length,
+      Meaning: 'LPNs in the current CSV where pick age is above 24 hours',
+    },
+    {
+      KPI: 'Qty > 24h from Pick Date/Time',
+      Value: over24Rows.reduce((sum, row) => sum + (parseInt(row.Qty, 10) || 0), 0),
+      Meaning: 'Total quantity linked to LPNs older than 24 hours in the current CSV',
+    },
+    {
+      KPI: 'LPNs > 7 days from Pick Date/Time',
+      Value: over7DaysRows.length,
+      Meaning: 'LPNs in the current CSV where pick age is above 7 days',
+    },
+    {
+      KPI: 'Qty > 7 days from Pick Date/Time',
+      Value: over7DaysRows.reduce((sum, row) => sum + (parseInt(row.Qty, 10) || 0), 0),
+      Meaning: 'Total quantity linked to LPNs older than 7 days in the current CSV',
+    },
+    {
+      KPI: 'Oldest LPN in Current CSV',
+      Value: oldestRow ? `${oldestRow.LPN} - ${oldestRow['CSV Age']}` : 'N/A',
+      Meaning: 'Oldest LPN still present in the current BlueYonder CSV report',
+    },
+  ];
+};
+
+const buildExecutiveSummaryRows = ({
+  reportLpnCount,
+  totalReportQty,
+  notStartedRecords,
+  openRecords,
+  pendingCompletion,
+  completedRecords,
+  over24Records,
+  over24Qty,
+  oldestOpenRecord,
+  trackerData,
+  summaryRows,
+}) => {
+  const userPerformance = buildUserPerformanceRows(trackerData);
+  const storeAnalysis = buildStoreAnalysisRows(summaryRows);
+
+  const topUser = userPerformance[0]?.User || 'N/A';
+  const topUserQty = userPerformance[0]?.['Qty Processed'] || 0;
+
+  const topStore = storeAnalysis.slice().sort((a, b) => b.Qty - a.Qty)[0];
+
+  const csvAgingDetailRows = buildCsvAgingDetailRows(summaryRows);
+
+  const csvOver24Rows = csvAgingDetailRows.filter(row => {
+    const age = parseFloat(row['CSV Age Hours']) || 0;
+    return age > 24;
+  });
+
+  const csvOver7DaysRows = csvAgingDetailRows.filter(row => {
+    const age = parseFloat(row['CSV Age Hours']) || 0;
+    return age > 168;
+  });
+
+  return [
+    { Section: 'Report KPI', KPI: 'Total LPNs in Report', Value: reportLpnCount },
+    { Section: 'Report KPI', KPI: 'Total Qty in Report', Value: totalReportQty },
+    { Section: 'Status KPI', KPI: 'Completed LPNs', Value: completedRecords.length },
+    { Section: 'Status KPI', KPI: 'Open LPNs', Value: openRecords.length },
+    { Section: 'Status KPI', KPI: 'Partial LPNs', Value: pendingCompletion.length },
+    { Section: 'Status KPI', KPI: 'Not Started LPNs', Value: notStartedRecords.length },
+    { Section: 'Exception KPI', KPI: 'Open Over 24h', Value: over24Records.length },
+    { Section: 'Exception KPI', KPI: 'Qty Over 24h', Value: over24Qty },
+    {
+      Section: 'CSV Aging KPI',
+      KPI: 'CSV LPNs > 24h from Pick Date/Time',
+      Value: csvOver24Rows.length,
+    },
+    {
+      Section: 'CSV Aging KPI',
+      KPI: 'CSV LPNs > 7 Days from Pick Date/Time',
+      Value: csvOver7DaysRows.length,
+    },
+    {
+      Section: 'CSV Aging KPI',
+      KPI: 'CSV Qty > 24h from Pick Date/Time',
+      Value: csvOver24Rows.reduce((sum, row) => sum + (parseInt(row.Qty, 10) || 0), 0),
+    },
+    {
+      Section: 'CSV Aging KPI',
+      KPI: 'CSV Qty > 7 Days from Pick Date/Time',
+      Value: csvOver7DaysRows.reduce((sum, row) => sum + (parseInt(row.Qty, 10) || 0), 0),
+    },
+    {
+      Section: 'Operational Insight',
+      KPI: 'Oldest Open LPN',
+      Value: oldestOpenRecord ? `${oldestOpenRecord.lpn} - ${oldestOpenRecord.ageHours.toFixed(1)} hrs` : 'None',
+    },
+    {
+      Section: 'Operational Insight',
+      KPI: 'Top Tagging User',
+      Value: `${topUser} - ${topUserQty} items`,
+    },
+    {
+      Section: 'Operational Insight',
+      KPI: 'Top Store by Qty',
+      Value: topStore ? `${topStore.Store} - ${topStore.Qty} items` : 'N/A',
+    },
+    {
+      Section: 'Generated',
+      KPI: 'Download Timestamp',
+      Value: new Date().toLocaleString(),
+    },
+  ];
+};
+
+
+// ======================================================
+// CREATE CSV AGING KPI SHEET
+// Left table: General CSV Aging KPIs
+// Right table: CSV Aging by Store
+// ======================================================
+const createCsvAgingKpiSheet = (wb, summaryRows) => {
+  const csvAgingKpiRows = buildCsvAgingKpiRows(summaryRows);
+  const csvAgingStoreRows = buildCsvAgingByStoreRows(summaryRows);
+
+  const ws = XLSX.utils.json_to_sheet(csvAgingKpiRows, {
+    origin: 'A1',
+  });
+
+  XLSX.utils.sheet_add_json(ws, csvAgingStoreRows, {
+    origin: 'E1',
+    skipHeader: false,
+  });
+
+  const fullHeaderKeys = [
+    'KPI',
+    'Value',
+    'Meaning',
+    '',
+    'Store',
+    'Total LPNs',
+    'Total Qty',
+    '>24h LPNs',
+    '>24h Qty',
+    '>7 Days LPNs',
+    '>7 Days Qty',
+    'Oldest LPN',
+    'Oldest Age',
+    'Risk Level',
+    'Operational Note',
+  ];
+
+  applyDhlExcelStyle(ws, csvAgingKpiRows, fullHeaderKeys);
+
+  ws['!cols'] = [
+    { wch: 36 },
+    { wch: 16 },
+    { wch: 62 },
+    { wch: 4 },
+    { wch: 18 },
+    { wch: 14 },
+    { wch: 14 },
+    { wch: 14 },
+    { wch: 14 },
+    { wch: 16 },
+    { wch: 16 },
+    { wch: 18 },
+    { wch: 18 },
+    { wch: 16 },
+    { wch: 70 },
+  ];
+
+  ws['!autofilter'] = {
+    ref: ws['!ref'],
+  };
+
+  XLSX.utils.book_append_sheet(wb, ws, 'CSV Aging KPI');
+};
+
+
+const handleDownload = () => {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const filename = `tagging_premium_report_${timestamp}.xlsx`;
+
+  const wb = XLSX.utils.book_new();
+
+  // ======================================================
+  // 1. Executive Summary
+  // ======================================================
+  const executiveRows = buildExecutiveSummaryRows({
+    reportLpnCount,
+    totalReportQty,
+    notStartedRecords,
+    openRecords,
+    pendingCompletion,
+    completedRecords,
+    over24Records,
+    over24Qty,
+    oldestOpenRecord,
+    trackerData,
+    summaryRows,
+  });
+
+  createStyledSheet(wb, 'Executive Summary', executiveRows, []);
+
+  // ======================================================
+  // 2. Tracker Data
+  // ======================================================
+  const wsData = trackerData.map(row => ({
+    Date: row.date,
+    'Pick Time': row.pickTime || '',
+    'Pick User': row.pickUser || '',
+    LPN: row.lpn,
+    'Tagging User': row.user,
+    'Total Items': row.totalItems,
+    Groups: getTrackerGroupsText(row),
+    'Assign Date': row.assignDate,
+    'Start Time': row.startTime,
+    'End Time': row.endTime,
+    'Total Time': row.totalTime,
+    Efficiency: row.efficiency,
+    'Items / Hour': row.itemsPerHour || '',
+  }));
+
+  createStyledSheet(wb, 'Tracker Data', wsData, ['Date', 'Assign Date']);
+
+  // ======================================================
+  // 3. LPN Summary
+  // ======================================================
+  const summaryWsData = summaryRows.map(row => ({
+    Date: row.date,
+    'Pick Time': row.pickTime || '',
+    'Pick User': row.pickUser || '',
+    LPN: row.lpn,
+    Qty: row.qty,
+    Groups: row.groups,
+    'Tagging User': row.taggingUser,
+    Status: row.status,
+    'Age Hours': formatAgeHoursWithDays(row.ageHours),
+  }));
+
+  createStyledSheet(wb, 'LPN Summary', summaryWsData, ['Date']);
+
+  // ======================================================
+  // 4. Store Analysis
+  // ======================================================
+  const storeRows = buildStoreAnalysisRows(summaryRows);
+
+  createStyledSheet(wb, 'Store Analysis', storeRows, []);
+
+  // ======================================================
+  // 5. User Performance
+  // ======================================================
+  const userRows = buildUserPerformanceRows(trackerData);
+
+  createStyledSheet(wb, 'User Performance', userRows, []);
+
+  // ======================================================
+  // 6. Exceptions
+  // ======================================================
+  const exceptionsRows = buildExceptionsRows(summaryRows, pendingCompletion);
+
+  createStyledSheet(wb, 'Exceptions', exceptionsRows, ['Date']);
+
+  // ======================================================
+  // 7. CSV Aging KPI
+  // Left table: General CSV Aging KPIs
+  // Right table: CSV Aging by Store
+  // ======================================================
+  createCsvAgingKpiSheet(wb, summaryRows);
+
+  // ======================================================
+  // 8. CSV Aging Detail
+  // ======================================================
+  const csvAgingDetailRows = buildCsvAgingDetailRows(summaryRows);
+
+  createStyledSheet(wb, 'CSV Aging Detail', csvAgingDetailRows, ['Date']);
+
+  XLSX.writeFile(wb, filename);
+};
 
       const handleViewArchivedData = () => {
         setShowArchivedModal(true);
